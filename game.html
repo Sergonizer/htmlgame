@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Демка</title>
+  <style>
+    body {
+      background: #111;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    .game-container {
+      display: flex;
+    }
+    canvas {
+      background: #222;
+      border: 2px solid #555;
+    }
+    button {
+      margin-top: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .sidebar {
+      width: 250px;
+      background: #333;
+      padding: 10px;
+      border-radius: 5px;
+      display: flex;
+      flex-direction: column;
+    }
+    .block-type {
+      padding: 10px;
+      margin: 5px 0;
+      border-radius: 5px;
+      cursor: pointer;
+      text-align: center;
+      color: white;
+      transition: transform 0.1s;
+    }
+    .block-type:hover {
+      transform: scale(1.05);
+    }
+    .block-type.selected {
+      outline: 2px solid white;
+    }
+    .controls {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+    .disabled {
+      opacity: 0.5;
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+    .empty-levels-message {
+      text-align: center;
+      color: #777;
+      font-style: italic;
+      padding: 10px;
+    }
+    .levels-container {
+      width: 250px;
+      background: #333;
+      padding: 10px;
+      border-radius: 5px;
+      color: white;
+      overflow-y: auto;
+      max-height: 800px;
+    }
+    .levels-container h5 {
+      text-align: center;
+      margin-top: -10px;
+      margin-bottom: 15px;
+      color: #aaa;
+      font-size: 12px;
+    }
+    .level-item {
+      padding: 8px;
+      margin-top: 5px;
+      background: #444;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .level-item:hover {
+      background: #555;
+    }
+    .creator-controls {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+    .checkbox-container {
+      display: flex;
+      align-items: center;
+      color: white;
+      margin-top: 10px;
+    }
+    .gravity-indicator {
+      position: fixed;
+      top: 0px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 0 0 5px rgba(0,0,0,0.5);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .gravity-arrow {
+      width: 0;
+      height: 0;
+      border-left: 30px solid transparent;
+      border-right: 30px solid transparent;
+      opacity: 0.7;
+    }
+    .gravity-arrow.up {
+      border-bottom: 50px solid rgba(0, 170, 255, 0.7);
+    }
+    .gravity-arrow.down {
+      border-top: 50px solid rgba(0, 170, 255, 0.7);
+    }
+    @media (max-width: 1000px) {
+      .game-container {
+        flex-direction: column;
+        align-items: center;
+        margin: 20px 0;
+        height: auto;
+      }
+      canvas {
+        width: 90vw;
+        height: 90vw;
+        max-width: 500px;
+        max-height: 500px;
+      }
+      .sidebar, .levels-container {
+        width: 90vw;
+        max-width: 500px;
+        margin-top: 20px;
+      }
+      body {
+        height: auto;
+        min-height: 100vh;
+        padding: 20px 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="gravity-indicator">
+    <div>Gravity</div>
+    <div id="gravityArrow" class="gravity-arrow down"></div>
+  </div>
+  <div class="game-container">
+    <div class="levels-container" id="levelsContainer">
+      <h3 style="text-align: center;">Levels</h3>
+      <h5>(double click to select)</h5>
+      <div id="levelsList"></div>
+      <div class="checkbox-container">
+        <input type="checkbox" id="creatorModeCheckbox">
+        <label for="creatorModeCheckbox">Creator Mode</label>
+      </div>
+      <div class="slider-container" style="margin-top: 10px; color: white;">
+        <label for="speedSlider">Speed: <span id="speedValue">5.0</span> moves/sec</label>
+        <input type="range" id="speedSlider" min="10" max="200" value="50" style="width: 100%;">
+      </div>
+      <button id="hintBtn">Hint</button>
+    </div>
+    <canvas id="gameCanvas" width="800" height="800"></canvas>
+    <div class="sidebar">
+      <h3 style="color: white; text-align: center;">Block Types</h3>
+      <div id="blockTypes"></div>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="restartBtn">Restart</button>
+        <button id="clearBtn">Clear All</button>
+      </div>
+      <div class="creator-controls">
+        <input type="text" id="levelNameInput" placeholder="Level name">
+        <button id="saveLevelBtn">Save Level</button>
+        <button id="saveToFileBtn">Save to File</button>
+        <button id="loadFromFileBtn">Load from File</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const gridSize = 10;
+    const tileSize = 80;
+    const halfWidth = tileSize / 2;
+    const halfHeight = tileSize / 2;
+    const types = ["empty", "normal", "antigravity", "slide", "diag", "start", "finish", "breakable"];
+    const colors = {
+      empty: "#00000000",
+      normal: "#888",
+      antigravity: "#0af",
+      slide: "#fa0",
+      diag: "#888",
+      start: "#0f0",
+      finish: "#f00",
+      breakable: "#a52"
+    };
+    const typeNames = {
+      empty: "Empty",
+      normal: "Wall",
+      antigravity: "Anti-Gravity",
+      slide: "Slide",
+      diag: "Diagonal",
+      start: "Start",
+      finish: "Finish",
+      breakable: "Breakable"
+    };
+
+    const offsetX = canvas.width / 2;
+    const offsetY = canvas.height / 2 - (gridSize * halfHeight) + halfHeight;
+
+    const grid = Array.from({ length: gridSize }, () =>
+      Array.from({ length: gridSize }, () => ({ type: "empty", direction: "right" }))
+    );
+
+    let replacedType = null;
+    let startPosition = null;
+    let finishPosition = null;
+    let originalStartPosition = null;
+    let originalFinishPosition = null;
+    let originalHorizontalDirection = null;
+    let originalGravity = null;
+    let startInterval = null;
+    let horizontalDirection = null;
+    let gravity = "normal";
+    let selectedBlockType = "normal";
+    let finishAnimation = null;
+    let creatorMode = document.getElementById("creatorModeCheckbox").checked;
+    let movesPerSecond = 5;
+    let levelsDatabase = {};
+    let gameRunning = false;
+    let breakableBlocks = [];
+    
+
+    const blockTypesContainer = document.getElementById("blockTypes");
+    const levelsListContainer = document.getElementById("levelsList");
+    const creatorModeCheckbox = document.getElementById("creatorModeCheckbox");
+    const speedSlider = document.getElementById("speedSlider");
+    const speedValue = document.getElementById("speedValue");
+    const levelNameInput = document.getElementById("levelNameInput");
+    const saveLevelBtn = document.getElementById("saveLevelBtn");
+    const saveToFileBtn = document.getElementById("saveToFileBtn");
+    const loadFromFileBtn = document.getElementById("loadFromFileBtn");
+
+    function updateGravityIndicator() {
+      const gravityArrow = document.getElementById("gravityArrow");
+      gravityArrow.className = "gravity-arrow";
+      gravityArrow.classList.add(gravity === "antigravity" ? "up" : "down");
+    }
+
+    function updateBlockTypesVisibility() {
+      document.querySelectorAll(".block-type").forEach(el => {
+        const type = el.dataset.type;
+        if (!creatorMode && (type === "empty" || type === "start" || type === "finish")) {
+          el.style.display = "none";
+        } else {
+          el.style.display = "block";
+        }
+      });
+
+      clearBtn.style.display = creatorMode ? "block" : "none";
+      saveLevelBtn.style.display = creatorMode ? "block" : "none";
+      saveToFileBtn.style.display = creatorMode ? "block" : "none";
+      levelNameInput.style.display = creatorMode ? "block" : "none";
+    }
+
+    types.forEach(type => {      
+      const blockElement = document.createElement("div");
+      blockElement.className = "block-type";
+      blockElement.textContent = typeNames[type];
+      blockElement.style.backgroundColor = colors[type];
+      blockElement.dataset.type = type;
+      
+      if (type === selectedBlockType) {
+        blockElement.classList.add("selected");
+      }
+      
+      blockElement.addEventListener("click", () => {
+        if (!creatorMode && (type === "empty" || type === "start" || type === "finish")) {
+          return;
+        }
+        if (gameRunning) return;
+        document.querySelectorAll(".block-type").forEach(el => el.classList.remove("selected"));
+        blockElement.classList.add("selected");
+        selectedBlockType = type;
+      });
+      
+      blockTypesContainer.appendChild(blockElement);
+    });
+
+    creatorModeCheckbox.addEventListener("change", () => {
+      creatorMode = creatorModeCheckbox.checked;
+      updateBlockTypesVisibility();
+    });
+
+    speedSlider.addEventListener("input", () => {
+      const sliderValue = parseInt(speedSlider.value);
+      movesPerSecond = sliderValue / 10;
+      speedValue.textContent = movesPerSecond.toFixed(1);
+      if (gameRunning) {
+        clearInterval(startInterval);
+        startInterval = setInterval(moveStart, 1000 / movesPerSecond);
+      }
+    });
+
+    
+    function resizeCanvas() {
+      if (window.innerWidth <= 1000) {
+        const size = Math.min(window.innerWidth * 0.9, 500);
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
+      } else {
+        canvas.style.width = '';
+        canvas.style.height = '';
+      }
+    }
+
+    function updateButtonStates() {
+      const disabled = gameRunning;
+      document.querySelectorAll(".block-type, #startBtn, #creatorModeCheckbox, #levelNameInput, #saveLevelBtn, #saveToFileBtn, #loadFromFileBtn")
+        .forEach(el => {
+          if (disabled) {
+            el.classList.add("disabled");
+          } else {
+            el.classList.remove("disabled");
+          }
+        });
+    }
+
+    function saveLevel() {
+      const levelName = levelNameInput.value.trim();
+      if (!levelName) {
+        alert("Please enter a level name");
+        return;
+      }
+
+      const levelData = {
+        grid: JSON.parse(JSON.stringify(grid)).map(row => 
+          row.map(cell => ({ 
+            type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
+            direction: cell.direction
+          }))
+        ),
+        originalStartPosition: originalStartPosition ? [...originalStartPosition] : null,
+        originalFinishPosition: originalFinishPosition ? [...originalFinishPosition] : null,
+        originalHorizontalDirection: originalHorizontalDirection,
+        originalGravity: originalGravity
+      };
+
+      levelsDatabase[levelName] = levelData;
+      updateLevelsList();
+    }
+
+    function updateLevelsList() {
+      levelsListContainer.innerHTML = "";
+      const levelNames = Object.keys(levelsDatabase);
+      
+      if (levelNames.length === 0) {
+        const emptyMessage = document.createElement("div");
+        emptyMessage.className = "empty-levels-message";
+        emptyMessage.textContent = "Load a level from file to start";
+        levelsListContainer.appendChild(emptyMessage);
+        return;
+      }
+
+      levelNames.forEach(levelName => {
+        const levelItem = document.createElement("div");
+        levelItem.className = "level-item";
+        levelItem.textContent = levelName;
+        levelItem.addEventListener("dblclick", () => {
+          loadLevel(levelName);
+        });
+        levelsListContainer.appendChild(levelItem);
+      });
+    }
+
+    function loadLevel(levelName) {
+      if (!levelsDatabase[levelName]) return;
+
+      const levelData = levelsDatabase[levelName];
+      clearInterval(startInterval);
+      gameRunning = false;
+      updateButtonStates();
+
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          grid[y][x] = levelData.grid[y][x];
+        }
+      }
+
+      startPosition = originalStartPosition = levelData.originalStartPosition ? [...levelData.originalStartPosition] : null;
+      finishPosition = originalFinishPosition = levelData.originalFinishPosition ? [...levelData.originalFinishPosition] : null;
+      horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ? [...levelData.originalHorizontalDirection] : null;
+      gravity = originalGravity = levelData.originalGravity ? [...levelData.originalGravity] : null;
+      
+      horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ? 
+        (Array.isArray(levelData.originalHorizontalDirection) ? 
+          levelData.originalHorizontalDirection.join('') : 
+          levelData.originalHorizontalDirection) : 
+        null;
+      gravity = originalGravity = levelData.originalGravity ? 
+        (Array.isArray(levelData.originalGravity) ? 
+          levelData.originalGravity.join('') : 
+          levelData.originalGravity) : 
+        null;
+  
+      breakableBlocks = [];
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          if (grid[y][x].type === "breakable") {
+            breakableBlocks.push({x, y});
+          }
+        }
+      }
+      
+      finishAnimation = null;
+      drawGrid();
+    }
+
+    function saveToFile() {
+      const levelName = levelNameInput.value.trim() || "untitled";
+      const levelData = {
+        grid: JSON.parse(JSON.stringify(grid)).map(row => 
+          row.map(cell => ({ 
+            type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
+            direction: cell.direction
+          }))
+        ),
+        originalStartPosition: originalStartPosition ? [...originalStartPosition] : null,
+        originalFinishPosition: originalFinishPosition ? [...originalFinishPosition] : null,
+        originalHorizontalDirection: originalHorizontalDirection,
+        originalGravity: originalGravity
+      };
+
+      const dataStr = JSON.stringify(levelData);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      const exportFileDefaultName = `${levelName}.json`;
+
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+    }
+
+    function loadFromFile() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+
+      input.onchange = e => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.readAsText(file, 'UTF-8');
+
+        reader.onload = readerEvent => {
+          try {
+            const levelData = JSON.parse(readerEvent.target.result);
+            const levelName = file.name.replace('.json', '');
+            
+            if (!levelData.grid || !levelData.originalStartPosition || !levelData.originalFinishPosition) {
+              throw new Error("Invalid level file format");
+            }
+
+            levelsDatabase[levelName] = levelData;
+            updateLevelsList();
+          } catch (error) {
+            alert("Error loading level: " + error.message);
+          }
+        };
+      };
+
+      input.click();
+    }
+
+    saveLevelBtn.addEventListener("click", saveLevel);
+    saveToFileBtn.addEventListener("click", saveToFile);
+    loadFromFileBtn.addEventListener("click", loadFromFile);
+
+    function drawGrid() {
+      updateGravityIndicator();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const centerX = (x - y) * halfWidth + offsetX;
+          const centerY = (x + y) * halfHeight + offsetY;
+          drawTile(centerX, centerY, grid[y][x]);
+        }
+      }
+      
+      if (finishAnimation) {
+        const { x, y, size, opacity, frame } = finishAnimation;
+        const centerX = (x - y) * halfWidth + offsetX;
+        const centerY = (x + y) * halfHeight + offsetY;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - size/2);
+        ctx.lineTo(centerX + size/2, centerY);
+        ctx.lineTo(centerX, centerY + size/2);
+        ctx.lineTo(centerX - size/2, centerY);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.fill();
+        
+        finishAnimation.size += 25 * finishAnimation.frame / 50;
+        finishAnimation.opacity -= 0.02;
+        finishAnimation.frame++;
+        
+        if (finishAnimation.frame >= 50) {
+          finishAnimation = null;
+        }
+      }
+    }
+
+    function drawTile(cx, cy, tile) {
+      const type = tile.type;
+      const direction = tile.direction || "right";
+      
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - halfHeight);
+      ctx.lineTo(cx + halfWidth, cy);
+      ctx.lineTo(cx, cy + halfHeight);
+      ctx.lineTo(cx - halfWidth, cy);
+      ctx.closePath();
+      ctx.fillStyle = colors[type] || "#666";
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.stroke();
+      
+      if (type === "breakable") {
+        ctx.beginPath();
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.5);
+        ctx.lineTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.6, cy + halfHeight * 0.4);
+        ctx.strokeStyle = "#222";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.8, cy + halfHeight * 0.2);
+
+        ctx.moveTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
+        ctx.lineTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
+        ctx.lineTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx - halfWidth * 0.4, cy + halfHeight * 0.6);
+        ctx.strokeStyle = "#222";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
+        ctx.lineTo(cx + halfWidth * 0.0, cy + halfHeight * 1.0);
+
+        ctx.moveTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
+        ctx.lineTo(cx + halfWidth * 0.4, cy - halfHeight * 0.6);
+        ctx.strokeStyle = "#222";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.lineWidth = 1;
+      } else if (type === "diag") {
+        ctx.beginPath();
+        if (direction === "right") {
+          ctx.moveTo(cx - 2/3 * halfWidth, cy - 1/3 * halfHeight);
+          ctx.lineTo(cx + 1/3 * halfWidth, cy + 2/3 * halfHeight);
+          ctx.moveTo(cx - 1/3 * halfWidth, cy - 2/3 * halfHeight);
+          ctx.lineTo(cx + 2/3 * halfWidth, cy + 1/3 * halfHeight);
+        } else {
+          ctx.moveTo(cx - 2/3 * halfWidth, cy + 1/3 * halfHeight);
+          ctx.lineTo(cx + 1/3 * halfWidth, cy - 2/3 * halfHeight);
+          ctx.moveTo(cx - 1/3 * halfWidth, cy + 2/3 * halfHeight);
+          ctx.lineTo(cx + 2/3 * halfWidth, cy - 1/3 * halfHeight);
+        }
+        ctx.strokeStyle = "#222";
+        ctx.lineWidth = halfHeight / 5;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      } else if (type === "start") {
+        ctx.beginPath();
+        const left = horizontalDirection === "left" ? -1 : 1;
+        const flipped = gravity === "antigravity" ? -1 : 1;
+        const arrowSize = halfHeight / 2;
+        const arrowX = cx + left * arrowSize;
+        const arrowY = cy + flipped * arrowSize;
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(arrowX, arrowY);
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+            arrowX - left * arrowSize / 2,
+            arrowY                         
+        );
+
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+            arrowX,               
+            arrowY - flipped * arrowSize / 2
+        );
+
+        ctx.strokeStyle = "#222";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    }
+
+    function pointInDiamond(px, py, cx, cy) {
+      const dx = Math.abs(px - cx);
+      const dy = Math.abs(py - cy);
+      return dx / halfWidth + dy / halfHeight <= 1;
+    }
+
+    canvas.addEventListener("click", (e) => {
+      if (gameRunning) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          const centerX = (x - y) * halfWidth + offsetX;
+          const centerY = (x + y) * halfHeight + offsetY;
+
+          if (pointInDiamond(mx, my, centerX, centerY)) {
+            if (selectedBlockType === "start" && startPosition) {
+              const [sx, sy] = startPosition;
+              if (sx != x || sy != y)
+                grid[sy][sx] = { type: "empty", direction: "right" };
+            }
+
+            if (selectedBlockType === "finish" && finishPosition) {
+              const [sx, sy] = finishPosition;
+              if (sx != x || sy != y)
+                grid[sy][sx] = { type: "empty", direction: "right" };
+            }
+
+            if (grid[y][x].type === "start" && selectedBlockType !== "start") {
+              return;
+            }
+            
+            if (grid[y][x].type === "finish" && selectedBlockType !== "finish") {
+              return;
+            }
+
+            if (!creatorMode && !["normal", "slide", "antigravity", "breakable"].includes(grid[y][x].type)) {
+              return;
+            }
+
+            if (!creatorMode && !["normal", "slide", "antigravity", "breakable"].includes(selectedBlockType)) {
+              return;
+            }
+            
+            if (selectedBlockType === "diag" && grid[y][x].type === "diag") {
+              grid[y][x].direction = grid[y][x].direction === "right" ? "left" : "right";
+            } else if (selectedBlockType === "start" && grid[y][x].type === "start") {
+              if (horizontalDirection === null) {
+                horizontalDirection = "right";
+                gravity = "normal";
+              } else if (horizontalDirection === "right" && gravity === "normal") {
+                horizontalDirection = "left";
+              } else if (horizontalDirection === "left" && gravity === "normal") {
+                gravity = "antigravity";
+              } else if (horizontalDirection === "right" && gravity === "antigravity") {
+                gravity = "normal";
+              } else if (horizontalDirection === "left" && gravity === "antigravity") {
+                horizontalDirection = "right";
+              }
+            } else {
+              // Update breakable blocks list when placing/removing breakable blocks
+              if (grid[y][x].type === "breakable" && selectedBlockType !== "breakable") {
+                breakableBlocks = breakableBlocks.filter(block => !(block.x === x && block.y === y));
+              } else if (selectedBlockType === "breakable" && grid[y][x].type !== "breakable") {
+                breakableBlocks.push({x, y});
+              }
+              
+              grid[y][x] = { 
+                type: selectedBlockType, 
+                direction: selectedBlockType === "diag" ? "right" : grid[y][x].direction 
+              };
+            }
+
+            if (selectedBlockType === "start") {
+              startPosition = [x, y];
+              originalStartPosition = [x, y];
+              if (horizontalDirection === null) {
+                horizontalDirection = "right";
+                gravity = "normal";
+              }
+              originalHorizontalDirection = horizontalDirection;
+              originalGravity = gravity;
+            } else if (selectedBlockType === "finish") {
+              finishPosition = [x, y];
+              originalFinishPosition = [x, y];
+            }
+
+            drawGrid();
+            return;
+          }
+        }
+      }
+    });
+
+
+    function moveStart() {
+      if (!startPosition) {
+        console.log("No start position. Stopping.");
+        clearInterval(startInterval);
+        gameRunning = false;
+        return;
+      }
+
+      if (!finishPosition) {
+        console.log("No finish position. Stopping.");
+        clearInterval(startInterval);
+        gameRunning = false;
+        return;
+      }
+
+      let [x, y] = startPosition;
+      let moved = false;
+      let gravityChanged = false;
+      
+      const horizontalLeft = (gravity === "antigravity") ? -1 : 0;
+      const verticalLeft = (gravity === "antigravity") ? 0 : 1;
+      const horizontalRight = (gravity === "antigravity") ? 0 : 1;
+      const verticalRight = (gravity === "antigravity") ? -1 : 0;
+      let options = [
+        { dx: horizontalRight, dy: verticalRight },
+        { dx: horizontalLeft,  dy: verticalLeft } 
+      ];
+
+      if (horizontalDirection === "left") options.reverse();
+
+      for (const opt of options) {
+        const nx = x + opt.dx;
+        const ny = y + opt.dy;
+
+        if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
+          const next = grid[ny][nx];
+          
+          if (next.type === "finish") {
+            console.log("Congratulations! You reached the finish!");
+            clearInterval(startInterval);
+            grid[y][x] = replacedType;
+            replacedType = grid[ny][nx];
+            grid[ny][nx] = { type: "start", direction: "right" };
+            startPosition = [nx, ny];
+            moved = true;
+            
+            finishAnimation = {
+              x: nx,
+              y: ny,
+              size: tileSize,
+              opacity: 0.8,
+              frame: 0
+            };
+            
+            const animationInterval = setInterval(() => {
+              drawGrid();
+              if (!finishAnimation) {
+                clearInterval(animationInterval);
+                gameRunning = false;
+              }
+            }, 16);
+            
+            break;
+          } else if (next.type === "normal") {
+            console.log("Hit a wall at:", [nx, ny], "Changing horizontal direction");
+            horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+          } else if (next.type === "antigravity") {
+            console.log("Hit antigravity at:", [nx, ny], "Toggling gravity");
+            gravity = gravity === "antigravity" ? "normal" : "antigravity";
+            horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+            moved = false;
+            gravityChanged = true;
+            break;
+          } else if (next.type === "empty") {
+            console.log("Moving to empty block at:", [nx, ny]);
+            grid[y][x] = replacedType;
+            replacedType = grid[ny][nx];
+            grid[ny][nx] = { type: "start", direction: "right" };
+            startPosition = [nx, ny];
+            moved = true;
+            break;
+          } else if (next.type === "slide") {
+            moved = false;
+          } else if (next.type === "breakable") {
+            console.log("Hit a breakable at:", [nx, ny], "Changing horizontal direction");
+            horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+            console.log("Breaking block at:", [nx, ny]);
+            grid[ny][nx] = { type: "empty", direction: "right" };
+          } else if (next.type === "diag") {
+            if ((next.direction === "right" && (opt.dx === 1 || opt.dx === -1)) || 
+                (next.direction === "left" && (opt.dy === 1 || opt.dy === -1))) {
+              console.log("Moving through diagonal block at:", [nx, ny]);
+              grid[y][x] = replacedType;
+              replacedType = grid[ny][nx];
+              grid[ny][nx] = { type: "start", direction: "right" };
+              startPosition = [nx, ny];
+              moved = true;
+              break;
+            } else {
+              console.log("Hit diagonal block at wrong angle:", [nx, ny], "Changing horizontal direction");
+              horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+            }
+          }
+        } else {
+          console.log("Hit a grid wall at:", [nx, ny], "Changing horizontal direction");
+          horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+        }
+      }
+
+      if (gravityChanged) {
+        setTimeout(moveStart, 0);
+      } else if (!moved) {
+        console.log("No moves available. Stopping.");
+        clearInterval(startInterval);
+      }
+
+      drawGrid();
+    }
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      if (!startPosition) {
+        alert("No start block placed!");
+        return;
+      }
+      if (!finishPosition) {
+        alert("No finish block placed!");
+        return;
+      }
+      console.log("Game started.");
+      clearInterval(startInterval);
+      gameRunning = true;
+      updateButtonStates();
+      replacedType = { type: "empty", direction: horizontalDirection };
+      startInterval = setInterval(moveStart, 1000 / movesPerSecond);
+    });
+
+    document.getElementById("restartBtn").addEventListener("click", () => {
+      clearInterval(startInterval);
+      gameRunning = false;
+      updateButtonStates();
+      
+      if (originalStartPosition) {
+        if (startPosition) {
+          const [x, y] = startPosition;
+          grid[y][x] = replacedType;
+        }
+        const [x, y] = originalStartPosition;
+        grid[y][x] = { type: "start", direction: horizontalDirection };
+        startPosition = [x, y];
+      }
+      
+      // Restore all breakable blocks
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          if (breakableBlocks.some(block => block.x === x && block.y === y)) {
+            grid[y][x] = { type: "breakable", direction: "right" };
+          }
+        }
+      }
+      
+      horizontalDirection = originalHorizontalDirection;
+      gravity = originalGravity;
+      finishAnimation = null;
+      drawGrid();
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      clearInterval(startInterval);
+      gameRunning = false;
+      updateButtonStates();
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+          grid[y][x] = { type: "empty", direction: horizontalDirection };
+        }
+      }
+      startPosition = null;
+      originalStartPosition = null;
+      finishPosition = null;
+      originalFinishPosition = null;
+      horizontalDirection = "left";
+      gravity = "normal";
+      finishAnimation = null;
+      breakableBlocks = [];
+      drawGrid();
+    });
+    
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    updateBlockTypesVisibility();
+    drawGrid();
+    updateLevelsList();
+  </script>
+</body>
+</html>
