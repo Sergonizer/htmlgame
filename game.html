@@ -26,6 +26,7 @@
       padding: 10px 20px;
       font-size: 16px;
       cursor: pointer;
+      width: 100%;
     }
     .sidebar {
       width: 250px;
@@ -171,8 +172,8 @@
         <label for="creatorModeCheckbox">Creator Mode</label>
       </div>
       <div class="slider-container" style="margin-top: 10px; color: white;">
-        <label for="speedSlider">Speed: <span id="speedValue">5.0</span> moves/sec</label>
-        <input type="range" id="speedSlider" min="10" max="200" value="50" style="width: 100%;">
+        <label for="speedSlider">Speed: <span id="speedValue">10.0</span> moves/sec</label>
+        <input type="range" id="speedSlider" min="10" max="200" value="100" style="width: 100%;">
       </div>
       <button id="hintBtn">Hint</button>
     </div>
@@ -243,11 +244,14 @@
     let selectedBlockType = "normal";
     let finishAnimation = null;
     let creatorMode = document.getElementById("creatorModeCheckbox").checked;
-    let movesPerSecond = 5;
+    let movesPerSecond = 10;
     let levelsDatabase = {};
     let gameRunning = false;
     let breakableBlocks = [];
-    
+    let hintBlocks = [];
+    let currentHintIndex = 0;
+    let hintAnimation = null;
+    let hintAnimationFrameId = null;
 
     const blockTypesContainer = document.getElementById("blockTypes");
     const levelsListContainer = document.getElementById("levelsList");
@@ -320,21 +324,20 @@
       }
     });
 
-    
     function resizeCanvas() {
       if (window.innerWidth <= 1000) {
         const size = Math.min(window.innerWidth * 0.9, 500);
-        canvas.style.width = size + 'px';
-        canvas.style.height = size + 'px';
+        canvas.style.width = size + "px";
+        canvas.style.height = size + "px";
       } else {
-        canvas.style.width = '';
-        canvas.style.height = '';
+        canvas.style.width = "";
+        canvas.style.height = "";
       }
     }
 
     function updateButtonStates() {
       const disabled = gameRunning;
-      document.querySelectorAll(".block-type, #startBtn, #creatorModeCheckbox, #levelNameInput, #saveLevelBtn, #saveToFileBtn, #loadFromFileBtn")
+      document.querySelectorAll(".block-type, #startBtn, #creatorModeCheckbox, #levelNameInput, #saveLevelBtn, #saveToFileBtn, #loadFromFileBtn, #hintBtn")
         .forEach(el => {
           if (disabled) {
             el.classList.add("disabled");
@@ -344,14 +347,8 @@
         });
     }
 
-    function saveLevel() {
-      const levelName = levelNameInput.value.trim();
-      if (!levelName) {
-        alert("Please enter a level name");
-        return;
-      }
-
-      const levelData = {
+    function createLevelData() {
+      return {
         grid: JSON.parse(JSON.stringify(grid)).map(row => 
           row.map(cell => ({ 
             type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
@@ -361,9 +358,19 @@
         originalStartPosition: originalStartPosition ? [...originalStartPosition] : null,
         originalFinishPosition: originalFinishPosition ? [...originalFinishPosition] : null,
         originalHorizontalDirection: originalHorizontalDirection,
-        originalGravity: originalGravity
+        originalGravity: originalGravity,
+        hintBlocks: [...hintBlocks]
       };
+    }
 
+    function saveLevel() {
+      const levelName = levelNameInput.value.trim();
+      if (!levelName) {
+        alert("Please enter a level name");
+        return;
+      }
+
+      const levelData = createLevelData();
       levelsDatabase[levelName] = levelData;
       updateLevelsList();
     }
@@ -407,20 +414,21 @@
 
       startPosition = originalStartPosition = levelData.originalStartPosition ? [...levelData.originalStartPosition] : null;
       finishPosition = originalFinishPosition = levelData.originalFinishPosition ? [...levelData.originalFinishPosition] : null;
-      horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ? [...levelData.originalHorizontalDirection] : null;
-      gravity = originalGravity = levelData.originalGravity ? [...levelData.originalGravity] : null;
-      
       horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ? 
         (Array.isArray(levelData.originalHorizontalDirection) ? 
-          levelData.originalHorizontalDirection.join('') : 
+          levelData.originalHorizontalDirection.join("") : 
           levelData.originalHorizontalDirection) : 
         null;
       gravity = originalGravity = levelData.originalGravity ? 
         (Array.isArray(levelData.originalGravity) ? 
-          levelData.originalGravity.join('') : 
+          levelData.originalGravity.join("") : 
           levelData.originalGravity) : 
         null;
-  
+
+      // Load hint blocks
+      hintBlocks = levelData.hintBlocks || [];
+      currentHintIndex = 0;
+
       breakableBlocks = [];
       for (let y = 0; y < gridSize; y++) {
         for (let x = 0; x < gridSize; x++) {
@@ -436,43 +444,32 @@
 
     function saveToFile() {
       const levelName = levelNameInput.value.trim() || "untitled";
-      const levelData = {
-        grid: JSON.parse(JSON.stringify(grid)).map(row => 
-          row.map(cell => ({ 
-            type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
-            direction: cell.direction
-          }))
-        ),
-        originalStartPosition: originalStartPosition ? [...originalStartPosition] : null,
-        originalFinishPosition: originalFinishPosition ? [...originalFinishPosition] : null,
-        originalHorizontalDirection: originalHorizontalDirection,
-        originalGravity: originalGravity
-      };
+      const levelData = createLevelData();
 
       const dataStr = JSON.stringify(levelData);
-      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      const dataUri = "data:application/json;charset=utf-8,"+ encodeURIComponent(dataStr);
       const exportFileDefaultName = `${levelName}.json`;
 
-      const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
-      linkElement.setAttribute('download', exportFileDefaultName);
+      const linkElement = document.createElement("a");
+      linkElement.setAttribute("href", dataUri);
+      linkElement.setAttribute("download", exportFileDefaultName);
       linkElement.click();
     }
 
     function loadFromFile() {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.json';
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json";
 
       input.onchange = e => {
         const file = e.target.files[0];
         const reader = new FileReader();
-        reader.readAsText(file, 'UTF-8');
+        reader.readAsText(file, "UTF-8");
 
         reader.onload = readerEvent => {
           try {
             const levelData = JSON.parse(readerEvent.target.result);
-            const levelName = file.name.replace('.json', '');
+            const levelName = file.name.replace(".json", "");
             
             if (!levelData.grid || !levelData.originalStartPosition || !levelData.originalFinishPosition) {
               throw new Error("Invalid level file format");
@@ -487,6 +484,87 @@
       };
 
       input.click();
+    }
+
+    function showHint() {
+      if (gameRunning) return;
+      if (hintBlocks.length === 0 || currentHintIndex >= hintBlocks.length) {
+        alert("No more hints available!");
+        return;
+      }
+
+      if (hintAnimationFrameId) {
+        cancelAnimationFrame(hintAnimationFrameId);
+        hintAnimationFrameId = null;
+      }
+
+      if (hintAnimation) {
+        const {x, y} = hintAnimation;
+        const hint = hintBlocks[currentHintIndex];
+        grid[y][x] = { type: hint.type, direction: hint.direction };
+        if (hint.type === "breakable") {
+          breakableBlocks.push({x, y});
+        }
+        hintAnimation = null;
+        currentHintIndex++;
+        drawGrid();
+        
+        if (currentHintIndex < hintBlocks.length) {
+          showHint();
+        }
+        return;
+      }
+
+      const hint = hintBlocks[currentHintIndex];
+      const {x, y, type, direction} = hint;
+      
+      if (grid[y][x].type != type) {
+        hintAnimation = {
+          x, y,
+          size: tileSize * 2,
+          opacity: 0.0,
+          frame: 0,
+          phase: "shrinking"
+        };
+        
+        const framesCount = 50;
+        const animateHint = () => {
+          if (!hintAnimation) return;
+          
+          if (hintAnimation.phase === "shrinking") {
+            hintAnimation.size -= hintAnimation.size / framesCount;
+            hintAnimation.opacity += 1 / framesCount;
+            hintAnimation.frame++;
+            
+            if (hintAnimation.size <= tileSize) {
+              grid[y][x] = { type, direction };
+              if (type === "breakable")
+                breakableBlocks.push({x, y});
+              hintAnimation.phase = "fading";
+              hintAnimationFrameId = requestAnimationFrame(animateHint);
+            } else {
+              hintAnimationFrameId = requestAnimationFrame(animateHint);
+            }
+            drawGrid();
+          } else if (hintAnimation.phase === "fading") {
+            hintAnimation.opacity -= 1 / framesCount;
+            hintAnimation.frame++;
+            
+            if (hintAnimation.opacity <= 0) {
+              hintAnimation = null;
+              currentHintIndex++;
+            } else {
+              hintAnimationFrameId = requestAnimationFrame(animateHint);
+            }
+            drawGrid();
+          }
+        };
+        
+        hintAnimationFrameId = requestAnimationFrame(animateHint);
+      } else {
+        currentHintIndex++;
+        showHint();
+      }
     }
 
     saveLevelBtn.addEventListener("click", saveLevel);
@@ -525,6 +603,22 @@
         if (finishAnimation.frame >= 50) {
           finishAnimation = null;
         }
+      }
+      
+      // Draw hint animation
+      if (hintAnimation) {
+        const { x, y, size, opacity } = hintAnimation;
+        const centerX = (x - y) * halfWidth + offsetX;
+        const centerY = (x + y) * halfHeight + offsetY;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - size/2);
+        ctx.lineTo(centerX + size/2, centerY);
+        ctx.lineTo(centerX, centerY + size/2);
+        ctx.lineTo(centerX - size/2, centerY);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`; // Green color for hints
+        ctx.fill();
       }
     }
 
@@ -684,7 +778,15 @@
                 horizontalDirection = "right";
               }
             } else {
-              // Update breakable blocks list when placing/removing breakable blocks
+              if (["breakable", "antigravity", "slide", "diag"].includes(selectedBlockType) && 
+                  grid[y][x].type !== selectedBlockType) {
+                hintBlocks.push({
+                  x, y,
+                  type: selectedBlockType,
+                  direction: selectedBlockType === "diag" ? "right" : grid[y][x].direction
+                });
+              }
+              
               if (grid[y][x].type === "breakable" && selectedBlockType !== "breakable") {
                 breakableBlocks = breakableBlocks.filter(block => !(block.x === x && block.y === y));
               } else if (selectedBlockType === "breakable" && grid[y][x].type !== "breakable") {
@@ -717,7 +819,6 @@
         }
       }
     });
-
 
     function moveStart() {
       if (!startPosition) {
@@ -869,8 +970,7 @@
         grid[y][x] = { type: "start", direction: horizontalDirection };
         startPosition = [x, y];
       }
-      
-      // Restore all breakable blocks
+
       for (let y = 0; y < gridSize; y++) {
         for (let x = 0; x < gridSize; x++) {
           if (breakableBlocks.some(block => block.x === x && block.y === y)) {
@@ -884,6 +984,8 @@
       finishAnimation = null;
       drawGrid();
     });
+    
+    document.getElementById("hintBtn").addEventListener("click", showHint);
 
     document.getElementById("clearBtn").addEventListener("click", () => {
       clearInterval(startInterval);
@@ -902,10 +1004,12 @@
       gravity = "normal";
       finishAnimation = null;
       breakableBlocks = [];
+      hintBlocks = [];
+      currentHintIndex = 0;
       drawGrid();
     });
-    
-    window.addEventListener('resize', resizeCanvas);
+
+    window.addEventListener("resize", resizeCanvas);
     resizeCanvas();
     updateBlockTypesVisibility();
     drawGrid();
