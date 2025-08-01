@@ -20,6 +20,7 @@
     canvas {
       background: #222;
       border: 2px solid #555;
+      touch-action: none;
     }
     button {
       margin-top: 10px;
@@ -27,6 +28,11 @@
       font-size: 16px;
       cursor: pointer;
       width: 100%;
+      outline: 1px solid #888;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
     }
     .sidebar {
       width: 250px;
@@ -38,18 +44,25 @@
     }
     .block-type {
       padding: 10px;
-      margin: 5px 0;
+      margin: 0;
       border-radius: 5px;
       cursor: pointer;
       text-align: center;
       color: white;
       transition: transform 0.1s;
+      outline: 1px solid #888;
+      user-select: none;
     }
     .block-type:hover {
       transform: scale(1.05);
     }
     .block-type.selected {
       outline: 2px solid white;
+    }
+    #blockTypes {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 5px;
     }
     .controls {
       margin-top: 10px;
@@ -202,7 +215,7 @@
     const tileSize = 80;
     const halfWidth = tileSize / 2;
     const halfHeight = tileSize / 2;
-    const types = ["empty", "normal", "antigravity", "slide", "diag", "start", "finish", "breakable"];
+    const types = ["start", "finish", "empty", "normal", "antigravity", "slide", "diag", "breakable"];
     const colors = {
       empty: "#00000000",
       normal: "#888",
@@ -238,7 +251,7 @@
     let originalFinishPosition = null;
     let originalHorizontalDirection = null;
     let originalGravity = null;
-    let startInterval = null;
+    let startAnimation = null;
     let horizontalDirection = null;
     let gravity = "normal";
     let selectedBlockType = "normal";
@@ -262,6 +275,8 @@
     const saveLevelBtn = document.getElementById("saveLevelBtn");
     const saveToFileBtn = document.getElementById("saveToFileBtn");
     const loadFromFileBtn = document.getElementById("loadFromFileBtn");
+    const startBtn = document.getElementById("startBtn");
+    const clearBtn = document.getElementById("clearBtn");
 
     function updateGravityIndicator() {
       const gravityArrow = document.getElementById("gravityArrow");
@@ -285,27 +300,27 @@
       levelNameInput.style.display = creatorMode ? "block" : "none";
     }
 
-    types.forEach(type => {      
+    types.forEach(type => {
       const blockElement = document.createElement("div");
       blockElement.className = "block-type";
       blockElement.textContent = typeNames[type];
       blockElement.style.backgroundColor = colors[type];
       blockElement.dataset.type = type;
-      
+
       if (type === selectedBlockType) {
         blockElement.classList.add("selected");
       }
-      
+
       blockElement.addEventListener("click", () => {
         if (!creatorMode && (type === "empty" || type === "start" || type === "finish")) {
           return;
         }
-        if (gameRunning) return;
+        if (gameRunning || startAnimation) return;
         document.querySelectorAll(".block-type").forEach(el => el.classList.remove("selected"));
         blockElement.classList.add("selected");
         selectedBlockType = type;
       });
-      
+
       blockTypesContainer.appendChild(blockElement);
     });
 
@@ -318,10 +333,6 @@
       const sliderValue = parseInt(speedSlider.value);
       movesPerSecond = sliderValue / 10;
       speedValue.textContent = movesPerSecond.toFixed(1);
-      if (gameRunning) {
-        clearInterval(startInterval);
-        startInterval = setInterval(moveStart, 1000 / movesPerSecond);
-      }
     });
 
     function resizeCanvas() {
@@ -336,7 +347,7 @@
     }
 
     function updateButtonStates() {
-      const disabled = gameRunning;
+      const disabled = gameRunning || !!startAnimation;
       document.querySelectorAll(".block-type, #startBtn, #creatorModeCheckbox, #levelNameInput, #saveLevelBtn, #saveToFileBtn, #loadFromFileBtn, #hintBtn")
         .forEach(el => {
           if (disabled) {
@@ -349,8 +360,8 @@
 
     function createLevelData() {
       return {
-        grid: JSON.parse(JSON.stringify(grid)).map(row => 
-          row.map(cell => ({ 
+        grid: JSON.parse(JSON.stringify(grid)).map(row =>
+          row.map(cell => ({
             type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
             direction: cell.direction
           }))
@@ -378,7 +389,7 @@
     function updateLevelsList() {
       levelsListContainer.innerHTML = "";
       const levelNames = Object.keys(levelsDatabase);
-      
+
       if (levelNames.length === 0) {
         const emptyMessage = document.createElement("div");
         emptyMessage.className = "empty-levels-message";
@@ -402,7 +413,7 @@
       if (!levelsDatabase[levelName]) return;
 
       const levelData = levelsDatabase[levelName];
-      clearInterval(startInterval);
+      cancelStartAnimation();
       gameRunning = false;
       updateButtonStates();
 
@@ -414,18 +425,17 @@
 
       startPosition = originalStartPosition = levelData.originalStartPosition ? [...levelData.originalStartPosition] : null;
       finishPosition = originalFinishPosition = levelData.originalFinishPosition ? [...levelData.originalFinishPosition] : null;
-      horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ? 
-        (Array.isArray(levelData.originalHorizontalDirection) ? 
-          levelData.originalHorizontalDirection.join("") : 
-          levelData.originalHorizontalDirection) : 
+      horizontalDirection = originalHorizontalDirection = levelData.originalHorizontalDirection ?
+        (Array.isArray(levelData.originalHorizontalDirection) ?
+          levelData.originalHorizontalDirection.join("") :
+          levelData.originalHorizontalDirection) :
         null;
-      gravity = originalGravity = levelData.originalGravity ? 
-        (Array.isArray(levelData.originalGravity) ? 
-          levelData.originalGravity.join("") : 
-          levelData.originalGravity) : 
+      gravity = originalGravity = levelData.originalGravity ?
+        (Array.isArray(levelData.originalGravity) ?
+          levelData.originalGravity.join("") :
+          levelData.originalGravity) :
         null;
 
-      // Load hint blocks
       hintBlocks = levelData.hintBlocks || [];
       currentHintIndex = 0;
 
@@ -433,11 +443,11 @@
       for (let y = 0; y < gridSize; y++) {
         for (let x = 0; x < gridSize; x++) {
           if (grid[y][x].type === "breakable") {
-            breakableBlocks.push({x, y});
+            breakableBlocks.push({ x, y });
           }
         }
       }
-      
+
       finishAnimation = null;
       drawGrid();
     }
@@ -445,11 +455,9 @@
     function saveToFile() {
       const levelName = levelNameInput.value.trim() || "untitled";
       const levelData = createLevelData();
-
       const dataStr = JSON.stringify(levelData);
-      const dataUri = "data:application/json;charset=utf-8,"+ encodeURIComponent(dataStr);
+      const dataUri = "data:application/json;charset=utf-8," + encodeURIComponent(dataStr);
       const exportFileDefaultName = `${levelName}.json`;
-
       const linkElement = document.createElement("a");
       linkElement.setAttribute("href", dataUri);
       linkElement.setAttribute("download", exportFileDefaultName);
@@ -470,7 +478,7 @@
           try {
             const levelData = JSON.parse(readerEvent.target.result);
             const levelName = file.name.replace(".json", "");
-            
+
             if (!levelData.grid || !levelData.originalStartPosition || !levelData.originalFinishPosition) {
               throw new Error("Invalid level file format");
             }
@@ -487,7 +495,7 @@
     }
 
     function showHint() {
-      if (gameRunning) return;
+      if (gameRunning || startAnimation) return;
       if (hintBlocks.length === 0 || currentHintIndex >= hintBlocks.length) {
         alert("No more hints available!");
         return;
@@ -499,16 +507,16 @@
       }
 
       if (hintAnimation) {
-        const {x, y} = hintAnimation;
+        const { x, y } = hintAnimation;
         const hint = hintBlocks[currentHintIndex];
         grid[y][x] = { type: hint.type, direction: hint.direction };
         if (hint.type === "breakable") {
-          breakableBlocks.push({x, y});
+          breakableBlocks.push({ x, y });
         }
         hintAnimation = null;
         currentHintIndex++;
         drawGrid();
-        
+
         if (currentHintIndex < hintBlocks.length) {
           showHint();
         }
@@ -516,8 +524,8 @@
       }
 
       const hint = hintBlocks[currentHintIndex];
-      const {x, y, type, direction} = hint;
-      
+      const { x, y, type, direction } = hint;
+
       if (grid[y][x].type != type) {
         hintAnimation = {
           x, y,
@@ -526,20 +534,20 @@
           frame: 0,
           phase: "shrinking"
         };
-        
+
         const framesCount = 50;
         const animateHint = () => {
           if (!hintAnimation) return;
-          
+
           if (hintAnimation.phase === "shrinking") {
             hintAnimation.size -= hintAnimation.size / framesCount;
             hintAnimation.opacity += 1 / framesCount;
             hintAnimation.frame++;
-            
+
             if (hintAnimation.size <= tileSize) {
               grid[y][x] = { type, direction };
               if (type === "breakable")
-                breakableBlocks.push({x, y});
+                breakableBlocks.push({ x, y });
               hintAnimation.phase = "fading";
               hintAnimationFrameId = requestAnimationFrame(animateHint);
             } else {
@@ -549,7 +557,7 @@
           } else if (hintAnimation.phase === "fading") {
             hintAnimation.opacity -= 1 / framesCount;
             hintAnimation.frame++;
-            
+
             if (hintAnimation.opacity <= 0) {
               hintAnimation = null;
               currentHintIndex++;
@@ -559,7 +567,7 @@
             drawGrid();
           }
         };
-        
+
         hintAnimationFrameId = requestAnimationFrame(animateHint);
       } else {
         currentHintIndex++;
@@ -581,43 +589,50 @@
           drawTile(centerX, centerY, grid[y][x]);
         }
       }
-      
+
       if (finishAnimation) {
         const { x, y, size, opacity, frame } = finishAnimation;
         const centerX = (x - y) * halfWidth + offsetX;
         const centerY = (x + y) * halfHeight + offsetY;
-        
+
         ctx.beginPath();
-        ctx.moveTo(centerX, centerY - size/2);
-        ctx.lineTo(centerX + size/2, centerY);
-        ctx.lineTo(centerX, centerY + size/2);
-        ctx.lineTo(centerX - size/2, centerY);
+        ctx.moveTo(centerX, centerY - size / 2);
+        ctx.lineTo(centerX + size / 2, centerY);
+        ctx.lineTo(centerX, centerY + size / 2);
+        ctx.lineTo(centerX - size / 2, centerY);
         ctx.closePath();
         ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
         ctx.fill();
-        
+
         finishAnimation.size += 25 * finishAnimation.frame / 50;
         finishAnimation.opacity -= 0.02;
         finishAnimation.frame++;
-        
+
         if (finishAnimation.frame >= 50) {
           finishAnimation = null;
         }
       }
-      
-      // Draw hint animation
+
+      if (startAnimation) {
+        const { from, to, progress } = startAnimation;
+        const ease = progress;
+        const interpX = from.cx + (to.cx - from.cx) * ease;
+        const interpY = from.cy + (to.cy - from.cy) * ease;
+        drawTile(interpX, interpY, { type: "start", direction: "right" });
+      }
+
       if (hintAnimation) {
         const { x, y, size, opacity } = hintAnimation;
         const centerX = (x - y) * halfWidth + offsetX;
         const centerY = (x + y) * halfHeight + offsetY;
-        
+
         ctx.beginPath();
-        ctx.moveTo(centerX, centerY - size/2);
-        ctx.lineTo(centerX + size/2, centerY);
-        ctx.lineTo(centerX, centerY + size/2);
-        ctx.lineTo(centerX - size/2, centerY);
+        ctx.moveTo(centerX, centerY - size / 2);
+        ctx.lineTo(centerX + size / 2, centerY);
+        ctx.lineTo(centerX, centerY + size / 2);
+        ctx.lineTo(centerX - size / 2, centerY);
         ctx.closePath();
-        ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`; // Green color for hints
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
         ctx.fill();
       }
     }
@@ -625,7 +640,7 @@
     function drawTile(cx, cy, tile) {
       const type = tile.type;
       const direction = tile.direction || "right";
-      
+
       ctx.beginPath();
       ctx.moveTo(cx, cy - halfHeight);
       ctx.lineTo(cx + halfWidth, cy);
@@ -636,7 +651,7 @@
       ctx.fill();
       ctx.strokeStyle = "#333";
       ctx.stroke();
-      
+
       if (type === "breakable") {
         ctx.beginPath();
         ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.5);
@@ -674,15 +689,15 @@
       } else if (type === "diag") {
         ctx.beginPath();
         if (direction === "right") {
-          ctx.moveTo(cx - 2/3 * halfWidth, cy - 1/3 * halfHeight);
-          ctx.lineTo(cx + 1/3 * halfWidth, cy + 2/3 * halfHeight);
-          ctx.moveTo(cx - 1/3 * halfWidth, cy - 2/3 * halfHeight);
-          ctx.lineTo(cx + 2/3 * halfWidth, cy + 1/3 * halfHeight);
+          ctx.moveTo(cx - 2 / 3 * halfWidth, cy - 1 / 3 * halfHeight);
+          ctx.lineTo(cx + 1 / 3 * halfWidth, cy + 2 / 3 * halfHeight);
+          ctx.moveTo(cx - 1 / 3 * halfWidth, cy - 2 / 3 * halfHeight);
+          ctx.lineTo(cx + 2 / 3 * halfWidth, cy + 1 / 3 * halfHeight);
         } else {
-          ctx.moveTo(cx - 2/3 * halfWidth, cy + 1/3 * halfHeight);
-          ctx.lineTo(cx + 1/3 * halfWidth, cy - 2/3 * halfHeight);
-          ctx.moveTo(cx - 1/3 * halfWidth, cy + 2/3 * halfHeight);
-          ctx.lineTo(cx + 2/3 * halfWidth, cy - 1/3 * halfHeight);
+          ctx.moveTo(cx - 2 / 3 * halfWidth, cy + 1 / 3 * halfHeight);
+          ctx.lineTo(cx + 1 / 3 * halfWidth, cy - 2 / 3 * halfHeight);
+          ctx.moveTo(cx - 1 / 3 * halfWidth, cy + 2 / 3 * halfHeight);
+          ctx.lineTo(cx + 2 / 3 * halfWidth, cy - 1 / 3 * halfHeight);
         }
         ctx.strokeStyle = "#222";
         ctx.lineWidth = halfHeight / 5;
@@ -699,14 +714,14 @@
         ctx.lineTo(arrowX, arrowY);
         ctx.moveTo(arrowX, arrowY);
         ctx.lineTo(
-            arrowX - left * arrowSize / 2,
-            arrowY                         
+          arrowX - left * arrowSize / 2,
+          arrowY
         );
 
         ctx.moveTo(arrowX, arrowY);
         ctx.lineTo(
-            arrowX,               
-            arrowY - flipped * arrowSize / 2
+          arrowX,
+          arrowY - flipped * arrowSize / 2
         );
 
         ctx.strokeStyle = "#222";
@@ -722,11 +737,23 @@
       return dx / halfWidth + dy / halfHeight <= 1;
     }
 
-    canvas.addEventListener("click", (e) => {
-      if (gameRunning) return;
+    function getPointerPos(e) {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      let clientX, clientY;
+      if (e.touches && e.touches[0]) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+      return { mx: clientX - rect.left, my: clientY - rect.top };
+    }
+
+    function handleCanvasInteraction(e) {
+      if (gameRunning || startAnimation) return;
+      e.preventDefault();
+      const { mx, my } = getPointerPos(e);
 
       for (let y = 0; y < gridSize; y++) {
         for (let x = 0; x < gridSize; x++) {
@@ -749,7 +776,7 @@
             if (grid[y][x].type === "start" && selectedBlockType !== "start") {
               return;
             }
-            
+
             if (grid[y][x].type === "finish" && selectedBlockType !== "finish") {
               return;
             }
@@ -761,7 +788,7 @@
             if (!creatorMode && !["normal", "slide", "antigravity", "breakable"].includes(selectedBlockType)) {
               return;
             }
-            
+
             if (selectedBlockType === "diag" && grid[y][x].type === "diag") {
               grid[y][x].direction = grid[y][x].direction === "right" ? "left" : "right";
             } else if (selectedBlockType === "start" && grid[y][x].type === "start") {
@@ -778,24 +805,24 @@
                 horizontalDirection = "right";
               }
             } else {
-              if (["breakable", "antigravity", "slide", "diag"].includes(selectedBlockType) && 
-                  grid[y][x].type !== selectedBlockType) {
+              if (["breakable", "antigravity", "slide", "diag"].includes(selectedBlockType) &&
+                grid[y][x].type !== selectedBlockType) {
                 hintBlocks.push({
                   x, y,
                   type: selectedBlockType,
                   direction: selectedBlockType === "diag" ? "right" : grid[y][x].direction
                 });
               }
-              
+
               if (grid[y][x].type === "breakable" && selectedBlockType !== "breakable") {
                 breakableBlocks = breakableBlocks.filter(block => !(block.x === x && block.y === y));
               } else if (selectedBlockType === "breakable" && grid[y][x].type !== "breakable") {
-                breakableBlocks.push({x, y});
+                breakableBlocks.push({ x, y });
               }
-              
-              grid[y][x] = { 
-                type: selectedBlockType, 
-                direction: selectedBlockType === "diag" ? "right" : grid[y][x].direction 
+
+              grid[y][x] = {
+                type: selectedBlockType,
+                direction: selectedBlockType === "diag" ? "right" : grid[y][x].direction
               };
             }
 
@@ -818,128 +845,165 @@
           }
         }
       }
-    });
+    }
 
-    function moveStart() {
-      if (!startPosition) {
-        console.log("No start position. Stopping.");
-        clearInterval(startInterval);
-        gameRunning = false;
-        return;
+    canvas.addEventListener("click", handleCanvasInteraction);
+    canvas.addEventListener("touchstart", handleCanvasInteraction, { passive: false });
+
+    function cancelStartAnimation() {
+      if (startAnimation && startAnimation.raf) {
+        cancelAnimationFrame(startAnimation.raf);
       }
+      startAnimation = null;
+    }
 
-      if (!finishPosition) {
-        console.log("No finish position. Stopping.");
-        clearInterval(startInterval);
-        gameRunning = false;
-        return;
-      }
-
+    function computeNextMove() {
+      if (!startPosition || !finishPosition) return null;
       let [x, y] = startPosition;
-      let moved = false;
-      let gravityChanged = false;
-      
       const horizontalLeft = (gravity === "antigravity") ? -1 : 0;
       const verticalLeft = (gravity === "antigravity") ? 0 : 1;
       const horizontalRight = (gravity === "antigravity") ? 0 : 1;
       const verticalRight = (gravity === "antigravity") ? -1 : 0;
       let options = [
         { dx: horizontalRight, dy: verticalRight },
-        { dx: horizontalLeft,  dy: verticalLeft } 
+        { dx: horizontalLeft, dy: verticalLeft }
       ];
-
       if (horizontalDirection === "left") options.reverse();
-
-      for (const opt of options) {
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
         const nx = x + opt.dx;
         const ny = y + opt.dy;
-
         if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
           const next = grid[ny][nx];
-          
+          console.log(next.type);
           if (next.type === "finish") {
-            console.log("Congratulations! You reached the finish!");
-            clearInterval(startInterval);
-            grid[y][x] = replacedType;
-            replacedType = grid[ny][nx];
-            grid[ny][nx] = { type: "start", direction: "right" };
-            startPosition = [nx, ny];
-            moved = true;
-            
-            finishAnimation = {
-              x: nx,
-              y: ny,
-              size: tileSize,
-              opacity: 0.8,
-              frame: 0
-            };
-            
-            const animationInterval = setInterval(() => {
-              drawGrid();
-              if (!finishAnimation) {
-                clearInterval(animationInterval);
-                gameRunning = false;
-              }
-            }, 16);
-            
-            break;
+            return { type: "finish", nx, ny };
           } else if (next.type === "normal") {
-            console.log("Hit a wall at:", [nx, ny], "Changing horizontal direction");
             horizontalDirection = horizontalDirection === "left" ? "right" : "left";
           } else if (next.type === "antigravity") {
-            console.log("Hit antigravity at:", [nx, ny], "Toggling gravity");
             gravity = gravity === "antigravity" ? "normal" : "antigravity";
             horizontalDirection = horizontalDirection === "left" ? "right" : "left";
-            moved = false;
-            gravityChanged = true;
-            break;
+            return { type: "gravityChanged" };
           } else if (next.type === "empty") {
-            console.log("Moving to empty block at:", [nx, ny]);
-            grid[y][x] = replacedType;
-            replacedType = grid[ny][nx];
-            grid[ny][nx] = { type: "start", direction: "right" };
-            startPosition = [nx, ny];
-            moved = true;
-            break;
+            return { type: "move", nx, ny };
           } else if (next.type === "slide") {
-            moved = false;
+            // skip
           } else if (next.type === "breakable") {
-            console.log("Hit a breakable at:", [nx, ny], "Changing horizontal direction");
             horizontalDirection = horizontalDirection === "left" ? "right" : "left";
-            console.log("Breaking block at:", [nx, ny]);
             grid[ny][nx] = { type: "empty", direction: "right" };
+            return { type: "breakableHandled" };
           } else if (next.type === "diag") {
-            if ((next.direction === "right" && (opt.dx === 1 || opt.dx === -1)) || 
-                (next.direction === "left" && (opt.dy === 1 || opt.dy === -1))) {
-              console.log("Moving through diagonal block at:", [nx, ny]);
-              grid[y][x] = replacedType;
-              replacedType = grid[ny][nx];
-              grid[ny][nx] = { type: "start", direction: "right" };
-              startPosition = [nx, ny];
-              moved = true;
-              break;
+            if ((next.direction === "right" && (opt.dx === 1 || opt.dx === -1)) ||
+              (next.direction === "left" && (opt.dy === 1 || opt.dy === -1))) {
+              return { type: "move", nx, ny };
             } else {
-              console.log("Hit diagonal block at wrong angle:", [nx, ny], "Changing horizontal direction");
               horizontalDirection = horizontalDirection === "left" ? "right" : "left";
             }
           }
         } else {
-          console.log("Hit a grid wall at:", [nx, ny], "Changing horizontal direction");
           horizontalDirection = horizontalDirection === "left" ? "right" : "left";
         }
       }
-
-      if (gravityChanged) {
-        setTimeout(moveStart, 0);
-      } else if (!moved) {
-        console.log("No moves available. Stopping.");
-        clearInterval(startInterval);
-      }
-
-      drawGrid();
+      return { type: "stuck" };
     }
 
-    document.getElementById("startBtn").addEventListener("click", () => {
+    function stepStart() {
+      if (!startPosition || !finishPosition) {
+        updateButtonStates();
+        return;
+      }
+      const decision = computeNextMove();
+      if (!decision) {
+        return;
+      }
+      if (decision.type === "gravityChanged") {
+        requestAnimationFrame(() => {
+          drawGrid();
+          setTimeout(stepStart, 0);
+        });
+        return;
+      }
+      if (decision.type === "stuck") {
+        drawGrid();
+        return;
+      }
+      if (decision.type === "finish") {
+        const prevPos = [...startPosition];
+        const [px, py] = prevPos;
+        grid[py][px] = replacedType;
+        const target = [decision.nx, decision.ny];
+        const destTile = grid[decision.ny][decision.nx];
+        animateStartMove(prevPos, target, () => {
+          replacedType = destTile;
+          startPosition = target.slice();
+          finishAnimation = {
+            x: decision.nx,
+            y: decision.ny,
+            size: tileSize,
+            opacity: 0.8,
+            frame: 0
+          };
+          const animationInterval = setInterval(() => {
+            drawGrid();
+            if (!finishAnimation) {
+              clearInterval(animationInterval);
+              updateButtonStates();
+            }
+          }, 16);
+        });
+        return;
+      }
+      if (decision.type === "move") {
+        const prevPos = [...startPosition];
+        const [px, py] = prevPos;
+        grid[py][px] = replacedType;
+        const target = [decision.nx, decision.ny];
+        const destTile = grid[decision.ny][decision.nx];
+        animateStartMove(prevPos, target, () => {
+          replacedType = destTile;
+          startPosition = target.slice();
+          setTimeout(stepStart, 0);
+        });
+        return;
+      }
+      if (decision.type === "breakableHandled") {
+        setTimeout(stepStart, 0);
+        return;
+      }
+    }
+
+    function animateStartMove(fromCell, toCell, onComplete) {
+      const fromCx = (fromCell[0] - fromCell[1]) * halfWidth + offsetX;
+      const fromCy = (fromCell[0] + fromCell[1]) * halfHeight + offsetY;
+      const toCx = (toCell[0] - toCell[1]) * halfWidth + offsetX;
+      const toCy = (toCell[0] + toCell[1]) * halfHeight + offsetY;
+      const duration = 1000 / movesPerSecond;
+      const startTime = performance.now();
+      if (startAnimation && startAnimation.raf) cancelAnimationFrame(startAnimation.raf);
+      startAnimation = {
+        from: { cx: fromCx, cy: fromCy },
+        to: { cx: toCx, cy: toCy },
+        progress: 0,
+        duration,
+        raf: null
+      };
+      function tick(now) {
+        const elapsed = now - startTime;
+        let progress = Math.min(1, elapsed / duration);
+        startAnimation.progress = progress;
+        drawGrid();
+        if (progress < 1) {
+          startAnimation.raf = requestAnimationFrame(tick);
+        } else {
+          grid[toCell[1]][toCell[0]] = { type: "start", direction: "right" };
+          startAnimation = null;
+          onComplete();
+        }
+      }
+      startAnimation.raf = requestAnimationFrame(tick);
+    }
+
+    startBtn.addEventListener("click", () => {
       if (!startPosition) {
         alert("No start block placed!");
         return;
@@ -948,19 +1012,17 @@
         alert("No finish block placed!");
         return;
       }
-      console.log("Game started.");
-      clearInterval(startInterval);
       gameRunning = true;
       updateButtonStates();
       replacedType = { type: "empty", direction: horizontalDirection };
-      startInterval = setInterval(moveStart, 1000 / movesPerSecond);
+      stepStart();
     });
 
     document.getElementById("restartBtn").addEventListener("click", () => {
-      clearInterval(startInterval);
+      cancelStartAnimation();
       gameRunning = false;
       updateButtonStates();
-      
+
       if (originalStartPosition) {
         if (startPosition) {
           const [x, y] = startPosition;
@@ -978,17 +1040,17 @@
           }
         }
       }
-      
+
       horizontalDirection = originalHorizontalDirection;
       gravity = originalGravity;
       finishAnimation = null;
       drawGrid();
     });
-    
+
     document.getElementById("hintBtn").addEventListener("click", showHint);
 
     document.getElementById("clearBtn").addEventListener("click", () => {
-      clearInterval(startInterval);
+      cancelStartAnimation();
       gameRunning = false;
       updateButtonStates();
       for (let y = 0; y < gridSize; y++) {
