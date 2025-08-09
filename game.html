@@ -668,19 +668,40 @@
         ctx.moveTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
         ctx.lineTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
         ctx.lineTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
-        ctx.lineTo(cx - halfWidth * 0.4, cy + halfHeight * 0.6);
+
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
+
+        ctx.moveTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
+        ctx.lineTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
+
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx - halfWidth * 0.5, cy - halfHeight * 0.5);
         ctx.strokeStyle = "#222";
         ctx.lineWidth = 2;
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
-        ctx.lineTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
-        ctx.lineTo(cx + halfWidth * 0.0, cy + halfHeight * 1.0);
-
         ctx.moveTo(cx + halfWidth * 0.3, cy - halfHeight * 0.1);
-        ctx.lineTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
+        ctx.lineTo(cx - halfWidth * 0.3, cy + halfHeight * 0.2);
+        ctx.lineTo(cx - halfWidth * 0.5, cy + halfHeight * 0.5);
+
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx - halfWidth * 0.3, cy + halfHeight * 0.2);
+        ctx.lineTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
+        ctx.lineTo(cx + halfWidth * 0.4, cy + halfHeight * 0.6);
+
+        ctx.moveTo(cx + halfWidth * 0.1, cy + halfHeight * 0.5);
+        ctx.lineTo(cx - halfWidth * 0.0, cy + halfHeight * 1.0);
+
+        ctx.moveTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
         ctx.lineTo(cx + halfWidth * 0.4, cy - halfHeight * 0.6);
+
+        ctx.moveTo(cx + halfWidth * 0.0, cy - halfHeight * 1.0);
+        ctx.lineTo(cx + halfWidth * 0.1, cy - halfHeight * 0.6);
+
+        ctx.moveTo(cx - halfWidth * 0.5, cy - halfHeight * 0.1);
+        ctx.lineTo(cx - halfWidth * 1.0, cy - halfHeight * 0.0);
         ctx.strokeStyle = "#222";
         ctx.lineWidth = 1;
         ctx.stroke();
@@ -875,7 +896,6 @@
         const ny = y + opt.dy;
         if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
           const next = grid[ny][nx];
-          console.log(next.type);
           if (next.type === "finish") {
             return { type: "finish", nx, ny };
           } else if (next.type === "normal") {
