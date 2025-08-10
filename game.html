@@ -78,7 +78,7 @@
       text-align: center;
       color: #777;
       font-style: italic;
-      padding: 10px;
+      padding: 8px;
     }
     .levels-container {
       width: 250px;
@@ -88,13 +88,6 @@
       color: white;
       overflow-y: auto;
       max-height: 800px;
-    }
-    .levels-container h5 {
-      text-align: center;
-      margin-top: -10px;
-      margin-bottom: 15px;
-      color: #aaa;
-      font-size: 12px;
     }
     .level-item {
       padding: 8px;
@@ -178,7 +171,6 @@
   <div class="game-container">
     <div class="levels-container" id="levelsContainer">
       <h3 style="text-align: center;">Levels</h3>
-      <h5>(double click to select)</h5>
       <div id="levelsList"></div>
       <div class="checkbox-container">
         <input type="checkbox" id="creatorModeCheckbox">
@@ -209,13 +201,58 @@
   </div>
 
   <script>
+    const _origRaf = window.requestAnimationFrame;
+    const _origCancelRaf = window.cancelAnimationFrame;
+    const _origSetTimeout = window.setTimeout;
+    const _origClearTimeout = window.clearTimeout;
+    const _origSetInterval = window.setInterval;
+    const _origClearInterval = window.clearInterval;
+
+    const activeRafs = new Set();
+    const activeTimeouts = new Set();
+    const activeIntervals = new Set();
+
+    function trackedRaf(callback) {
+      const id = _origRaf((time) => {
+        activeRafs.delete(id);
+        callback(time);
+      });
+      activeRafs.add(id);
+      return id;
+    }
+    function trackedTimeout(callback, delay) {
+      const id = _origSetTimeout(() => {
+        activeTimeouts.delete(id);
+        callback();
+      }, delay);
+      activeTimeouts.add(id);
+      return id;
+    }
+    function trackedInterval(callback, delay) {
+      const id = _origSetInterval(callback, delay);
+      activeIntervals.add(id);
+      return id;
+    }
+
+    function clearAllAnimations() {
+      activeRafs.forEach(_origCancelRaf);
+      activeRafs.clear();
+      activeTimeouts.forEach(_origClearTimeout);
+      activeTimeouts.clear();
+      activeIntervals.forEach(_origClearInterval);
+      activeIntervals.clear();
+      startAnimation = null;
+      hintAnimation = null;
+      finishAnimation = null;
+    }
+
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const gridSize = 10;
     const tileSize = 80;
     const halfWidth = tileSize / 2;
     const halfHeight = tileSize / 2;
-    const types = ["start", "finish", "empty", "normal", "antigravity", "slide", "diag", "breakable"];
+    const types = ["start", "finish", "empty", "normal", "antigravity", "slide", "diag", "breakable", "bounce"];
     const colors = {
       empty: "#00000000",
       normal: "#888",
@@ -224,7 +261,8 @@
       diag: "#888",
       start: "#0f0",
       finish: "#f00",
-      breakable: "#a52"
+      breakable: "#a52",
+      bounce: "#af0"
     };
     const typeNames = {
       empty: "Empty",
@@ -234,7 +272,8 @@
       diag: "Diagonal",
       start: "Start",
       finish: "Finish",
-      breakable: "Breakable"
+      breakable: "Breakable",
+      bounce: "Bounce"
     };
 
     const offsetX = canvas.width / 2;
@@ -362,7 +401,7 @@
       return {
         grid: JSON.parse(JSON.stringify(grid)).map(row =>
           row.map(cell => ({
-            type: (cell.type === "slide" || cell.type === "antigravity" || cell.type === "diag" || cell.type === "breakable") ? "normal" : cell.type,
+            type: ["antigravity", "slide", "diag", "breakable", "bounce"].includes(cell.type) ? "normal" : cell.type,
             direction: cell.direction
           }))
         ),
@@ -402,7 +441,7 @@
         const levelItem = document.createElement("div");
         levelItem.className = "level-item";
         levelItem.textContent = levelName;
-        levelItem.addEventListener("dblclick", () => {
+        levelItem.addEventListener("click", () => {
           loadLevel(levelName);
         });
         levelsListContainer.appendChild(levelItem);
@@ -413,8 +452,9 @@
       if (!levelsDatabase[levelName]) return;
 
       const levelData = levelsDatabase[levelName];
-      cancelStartAnimation();
       gameRunning = false;
+      clearAllAnimations();
+      cancelStartAnimation();
       updateButtonStates();
 
       for (let y = 0; y < gridSize; y++) {
@@ -549,9 +589,9 @@
               if (type === "breakable")
                 breakableBlocks.push({ x, y });
               hintAnimation.phase = "fading";
-              hintAnimationFrameId = requestAnimationFrame(animateHint);
+              hintAnimationFrameId = trackedRaf(animateHint);
             } else {
-              hintAnimationFrameId = requestAnimationFrame(animateHint);
+              hintAnimationFrameId = trackedRaf(animateHint);
             }
             drawGrid();
           } else if (hintAnimation.phase === "fading") {
@@ -562,13 +602,13 @@
               hintAnimation = null;
               currentHintIndex++;
             } else {
-              hintAnimationFrameId = requestAnimationFrame(animateHint);
+              hintAnimationFrameId = trackedRaf(animateHint);
             }
             drawGrid();
           }
         };
 
-        hintAnimationFrameId = requestAnimationFrame(animateHint);
+        hintAnimationFrameId = trackedRaf(animateHint);
       } else {
         currentHintIndex++;
         showHint();
@@ -590,6 +630,7 @@
         }
       }
 
+      const framesCount = 50;
       if (finishAnimation) {
         const { x, y, size, opacity, frame } = finishAnimation;
         const centerX = (x - y) * halfWidth + offsetX;
@@ -604,11 +645,13 @@
         ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
         ctx.fill();
 
-        finishAnimation.size += 25 * finishAnimation.frame / 50;
-        finishAnimation.opacity -= 0.02;
+        const t = finishAnimation.frame / framesCount;
+        finishAnimation.size =  tileSize * (1 + 9 * t);
+        const gamma = 2.2;
+        finishAnimation.opacity = Math.pow(1 - t, gamma);
         finishAnimation.frame++;
 
-        if (finishAnimation.frame >= 50) {
+        if (finishAnimation.opacity <= 0) {
           finishAnimation = null;
         }
       }
@@ -802,11 +845,7 @@
               return;
             }
 
-            if (!creatorMode && !["normal", "slide", "antigravity", "breakable"].includes(grid[y][x].type)) {
-              return;
-            }
-
-            if (!creatorMode && !["normal", "slide", "antigravity", "breakable"].includes(selectedBlockType)) {
+            if (!creatorMode && grid[y][x].type === "empty") {
               return;
             }
 
@@ -826,7 +865,7 @@
                 horizontalDirection = "right";
               }
             } else {
-              if (["breakable", "antigravity", "slide", "diag"].includes(selectedBlockType) &&
+              if (["antigravity", "slide", "diag", "breakable", "bounce"].includes(selectedBlockType) &&
                 grid[y][x].type !== selectedBlockType) {
                 hintBlocks.push({
                   x, y,
@@ -878,6 +917,40 @@
       startAnimation = null;
     }
 
+    function checkMovement(nx, ny, dx, dy) {
+      if (nx < 0 || ny < 0 || nx >= gridSize || ny >= gridSize) return null;
+      const next = grid[ny][nx];
+      if (next.type === "empty" || next.type === "finish") return { type: "move", nx, ny };
+      if (next.type === "slide") return null;
+      if (next.type === "diag") {
+        return (next.direction === "right" && (dx === 1 || dx === -1)) ||
+               (next.direction === "left" && (dy === 1 || dy === -1)) ? { type: "move", nx, ny } : null;
+      }
+      if (next.type === "bounce") {
+        const bx = nx - 2 * dx;
+        const by = ny - 2 * dy;
+        horizontalDirection = horizontalDirection === "left" ? "right" : "left";
+        if (checkMovement(bx, by, -dx, -dy)) {
+          return { type: "move", nx: bx, ny: by };
+        }
+      } 
+      return null;
+    }
+
+    function checkGravityEffect(nx, ny) {
+      const next = grid[ny][nx];
+      if (next.type === "antigravity")
+        return true;
+      return false;
+    }
+
+    function checkHorizontalDirectionEffect(nx, ny, ignoreDiag) {
+      const next = grid[ny][nx];
+      if (["normal", "breakable"].includes(next.type) || (!ignoreDiag && next.type === "diag"))
+        return true;
+      return false;
+    }
+
     function computeNextMove() {
       if (!startPosition || !finishPosition) return null;
       let [x, y] = startPosition;
@@ -896,29 +969,21 @@
         const ny = y + opt.dy;
         if (nx >= 0 && ny >= 0 && nx < gridSize && ny < gridSize) {
           const next = grid[ny][nx];
-          if (next.type === "finish") {
-            return { type: "finish", nx, ny };
-          } else if (next.type === "normal") {
-            horizontalDirection = horizontalDirection === "left" ? "right" : "left";
-          } else if (next.type === "antigravity") {
+          let movement = checkMovement(nx, ny, opt.dx, opt.dy);
+          if (checkGravityEffect(nx, ny))
+          {
             gravity = gravity === "antigravity" ? "normal" : "antigravity";
             horizontalDirection = horizontalDirection === "left" ? "right" : "left";
             return { type: "gravityChanged" };
-          } else if (next.type === "empty") {
-            return { type: "move", nx, ny };
-          } else if (next.type === "slide") {
-            // skip
-          } else if (next.type === "breakable") {
-            horizontalDirection = horizontalDirection === "left" ? "right" : "left";
-            grid[ny][nx] = { type: "empty", direction: "right" };
-            return { type: "breakableHandled" };
-          } else if (next.type === "diag") {
-            if ((next.direction === "right" && (opt.dx === 1 || opt.dx === -1)) ||
-              (next.direction === "left" && (opt.dy === 1 || opt.dy === -1))) {
-              return { type: "move", nx, ny };
-            } else {
+          }
+          if (next.type === "finish") return { type: "finish", nx, ny };
+          else if (movement) {
+            return movement;
+          } else {
+            if (checkHorizontalDirectionEffect(nx, ny, false))
               horizontalDirection = horizontalDirection === "left" ? "right" : "left";
-            }
+            if (next.type === "breakable")
+              grid[ny][nx] = { type: "empty", direction: "right" };
           }
         } else {
           horizontalDirection = horizontalDirection === "left" ? "right" : "left";
@@ -928,6 +993,7 @@
     }
 
     function stepStart() {
+      if (!gameRunning) { updateButtonStates(); return; }
       if (!startPosition || !finishPosition) {
         updateButtonStates();
         return;
@@ -937,9 +1003,9 @@
         return;
       }
       if (decision.type === "gravityChanged") {
-        requestAnimationFrame(() => {
+        trackedRaf(() => {
           drawGrid();
-          setTimeout(stepStart, 0);
+          trackedTimeout(stepStart, 0);
         });
         return;
       }
@@ -963,7 +1029,7 @@
             opacity: 0.8,
             frame: 0
           };
-          const animationInterval = setInterval(() => {
+          const animationInterval = trackedInterval(() => {
             drawGrid();
             if (!finishAnimation) {
               clearInterval(animationInterval);
@@ -982,12 +1048,12 @@
         animateStartMove(prevPos, target, () => {
           replacedType = destTile;
           startPosition = target.slice();
-          setTimeout(stepStart, 0);
+          trackedTimeout(stepStart, 0);
         });
         return;
       }
       if (decision.type === "breakableHandled") {
-        setTimeout(stepStart, 0);
+        trackedTimeout(stepStart, 0);
         return;
       }
     }
@@ -1013,14 +1079,14 @@
         startAnimation.progress = progress;
         drawGrid();
         if (progress < 1) {
-          startAnimation.raf = requestAnimationFrame(tick);
+          startAnimation.raf = trackedRaf(tick);
         } else {
           grid[toCell[1]][toCell[0]] = { type: "start", direction: "right" };
           startAnimation = null;
           onComplete();
         }
       }
-      startAnimation.raf = requestAnimationFrame(tick);
+      startAnimation.raf = trackedRaf(tick);
     }
 
     startBtn.addEventListener("click", () => {
@@ -1039,8 +1105,9 @@
     });
 
     document.getElementById("restartBtn").addEventListener("click", () => {
-      cancelStartAnimation();
       gameRunning = false;
+      clearAllAnimations();
+      cancelStartAnimation();
       updateButtonStates();
 
       if (originalStartPosition) {
@@ -1070,8 +1137,9 @@
     document.getElementById("hintBtn").addEventListener("click", showHint);
 
     document.getElementById("clearBtn").addEventListener("click", () => {
-      cancelStartAnimation();
       gameRunning = false;
+      clearAllAnimations();
+      cancelStartAnimation();
       updateButtonStates();
       for (let y = 0; y < gridSize; y++) {
         for (let x = 0; x < gridSize; x++) {
@@ -1082,7 +1150,7 @@
       originalStartPosition = null;
       finishPosition = null;
       originalFinishPosition = null;
-      horizontalDirection = "left";
+      horizontalDirection = "right";
       gravity = "normal";
       finishAnimation = null;
       breakableBlocks = [];
