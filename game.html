@@ -172,15 +172,19 @@
     <div class="levels-container" id="levelsContainer">
       <h3 style="text-align: center;">Levels</h3>
       <div id="levelsList"></div>
-      <div class="checkbox-container">
-        <input type="checkbox" id="creatorModeCheckbox">
-        <label for="creatorModeCheckbox">Creator Mode</label>
-      </div>
       <div class="slider-container" style="margin-top: 10px; color: white;">
         <label for="speedSlider">Speed: <span id="speedValue">10.0</span> moves/sec</label>
         <input type="range" id="speedSlider" min="10" max="200" value="100" style="width: 100%;">
       </div>
       <button id="hintBtn">Hint</button>
+      <div class="checkbox-container">
+        <input type="checkbox" id="creatorModeCheckbox">
+        <label for="creatorModeCheckbox">Creator Mode</label>
+      </div>
+      <div id="allowedBlockTypesContainer" style="margin-top:10px; color:white;">
+        <h4>Allowed Block Types</h4>
+        <div id="allowedBlockTypesList" style="display:grid; grid-template-columns: repeat(2, 1fr); gap:5px;"></div>
+      </div>
     </div>
     <canvas id="gameCanvas" width="800" height="800"></canvas>
     <div class="sidebar">
@@ -304,6 +308,35 @@
     let currentHintIndex = 0;
     let hintAnimation = null;
     let hintAnimationFrameId = null;
+    let allowedBlockTypes = [...types];
+
+    function renderAllowedBlockTypesUI() {
+      const container = document.getElementById("allowedBlockTypesList");
+      container.innerHTML = "";
+      types.forEach(type => {
+        const label = document.createElement("label");
+        label.style.display = "flex";
+        label.style.alignItems = "center";
+        label.style.gap = "5px";
+        label.style.fontSize = "14px";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = allowedBlockTypes.includes(type);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) {
+            if (!allowedBlockTypes.includes(type)) allowedBlockTypes.push(type);
+          } else {
+            allowedBlockTypes = allowedBlockTypes.filter(t => t !== type);
+          }
+          updateBlockTypesVisibility();
+        });
+
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(typeNames[type]));
+        container.appendChild(label);
+      });
+    }
 
     const blockTypesContainer = document.getElementById("blockTypes");
     const levelsListContainer = document.getElementById("levelsList");
@@ -324,12 +357,19 @@
     }
 
     function updateBlockTypesVisibility() {
+      document.getElementById("allowedBlockTypesContainer").style.display = creatorMode ? "" : "none";
       document.querySelectorAll(".block-type").forEach(el => {
         const type = el.dataset.type;
+        if (!creatorMode) {
+          if (!allowedBlockTypes.includes(type)) {
+            el.style.display = "none";
+            return;
+          }
+        }
         if (!creatorMode && (type === "empty" || type === "start" || type === "finish")) {
           el.style.display = "none";
         } else {
-          el.style.display = "block";
+          el.style.display = "";
         }
       });
 
@@ -366,6 +406,7 @@
     creatorModeCheckbox.addEventListener("change", () => {
       creatorMode = creatorModeCheckbox.checked;
       updateBlockTypesVisibility();
+      renderAllowedBlockTypesUI();
     });
 
     speedSlider.addEventListener("input", () => {
@@ -409,7 +450,8 @@
         originalFinishPosition: originalFinishPosition ? [...originalFinishPosition] : null,
         originalHorizontalDirection: originalHorizontalDirection,
         originalGravity: originalGravity,
-        hintBlocks: [...hintBlocks]
+        hintBlocks: [...hintBlocks],
+        allowedBlockTypes: [...allowedBlockTypes]
       };
     }
 
@@ -422,7 +464,8 @@
 
       const levelData = createLevelData();
       levelsDatabase[levelName] = levelData;
-      updateLevelsList();
+      renderAllowedBlockTypesUI();
+    updateLevelsList();
     }
 
     function updateLevelsList() {
@@ -477,6 +520,9 @@
         null;
 
       hintBlocks = levelData.hintBlocks || [];
+      allowedBlockTypes = levelData.allowedBlockTypes ? [...levelData.allowedBlockTypes] : [...types];
+      renderAllowedBlockTypesUI();
+      updateBlockTypesVisibility();
       currentHintIndex = 0;
 
       breakableBlocks = [];
@@ -524,7 +570,7 @@
             }
 
             levelsDatabase[levelName] = levelData;
-            updateLevelsList();
+    updateLevelsList();
           } catch (error) {
             alert("Error loading level: " + error.message);
           }
@@ -1163,6 +1209,7 @@
     resizeCanvas();
     updateBlockTypesVisibility();
     drawGrid();
+    renderAllowedBlockTypesUI();
     updateLevelsList();
   </script>
 </body>
